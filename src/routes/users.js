@@ -355,16 +355,14 @@ router.get('/customization', auth, async (req, res) => {
     if (userRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
     const user = userRes.rows[0];
-    const unlockedRes = await pool.query('SELECT item_id FROM user_unlocked_items WHERE user_id = $1', [req.user.id]);
-    const unlockedSet = new Set(unlockedRes.rows.map(r => r.item_id));
-
-    // Default free items always unlocked
-    unlockedSet.add('avatar_1');
-    unlockedSet.add('avatar_2');
-    unlockedSet.add('avatar_3');
-    unlockedSet.add('frame_none');
-    unlockedSet.add('banner_cyber_forest');
-    unlockedSet.add('banner_midnight_star');
+    const unlockedSet = new Set(['avatar_1', 'avatar_2', 'avatar_3', 'frame_none', 'banner_cyber_forest', 'banner_midnight_star']);
+    
+    try {
+      const unlockedRes = await pool.query('SELECT item_id FROM user_unlocked_items WHERE user_id = $1', [req.user.id]);
+      if (unlockedRes.rows) {
+        unlockedRes.rows.forEach(r => unlockedSet.add(r.item_id));
+      }
+    } catch (_) {}
 
     const avatars = CUSTOMIZATION_CATALOG.avatars.map(a => ({
       ...a,

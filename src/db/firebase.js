@@ -9,7 +9,11 @@ let auth = null;
 let isFirebaseConnected = false;
 let app = null;
 
-// Look for serviceAccountKey.json in possible locations
+let serviceAccount = null;
+try {
+  serviceAccount = require('../config/firebase_credentials');
+} catch (_) {}
+
 const keyPaths = [
   path.join(__dirname, '../../serviceAccountKey.json'),
   path.join(__dirname, '../config/serviceAccountKey.json'),
@@ -17,10 +21,14 @@ const keyPaths = [
 ];
 
 let serviceAccountPath = keyPaths.find(p => fs.existsSync(p));
-
-if (serviceAccountPath) {
+if (!serviceAccount && serviceAccountPath) {
   try {
-    const serviceAccount = require(serviceAccountPath);
+    serviceAccount = require(serviceAccountPath);
+  } catch (_) {}
+}
+
+if (serviceAccount) {
+  try {
     app = initializeApp({
       credential: cert(serviceAccount),
     });
@@ -30,7 +38,7 @@ if (serviceAccountPath) {
     console.log('🔥 Connected to Google Firebase Cloud Firestore successfully!');
     console.log(`📁 Project ID: ${serviceAccount.project_id}`);
   } catch (err) {
-    console.error('⚠️ Failed to initialize Firebase with serviceAccountKey.json:', err.message);
+    console.error('⚠️ Failed to initialize Firebase:', err.message);
   }
 } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
   try {
