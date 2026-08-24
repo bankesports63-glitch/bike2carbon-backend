@@ -37,8 +37,27 @@ async function autoInitDb() {
       console.log('✅ Full database restored successfully!');
     }
 
-    // Always ensure rewards exist (they are NOT dropped by schema)
+    // Migrate rewards table if it has the old wrong schema (missing is_active column)
     try {
+      const rewardsCols = await pool.query("PRAGMA table_info(rewards)");
+      const colNames = rewardsCols.rows.map(r => r.name);
+      const needsMigration = colNames.length > 0 && !colNames.includes('is_active');
+
+      if (needsMigration) {
+        console.log('🔄 Migrating rewards table to new schema...');
+        // Backup redemptions first
+        let redemptionBackup = [];
+        try {
+          const rb = await pool.query('SELECT * FROM user_redemptions');
+          redemptionBackup = rb.rows;
+        } catch (_) {}
+
+        await pool.query('DROP TABLE IF EXISTS user_redemptions');
+        await pool.query('DROP TABLE IF EXISTS rewards');
+        console.log('✅ Old rewards tables dropped, will recreate with correct schema');
+      }
+
+      // Create correct rewards table
       await pool.query(`CREATE TABLE IF NOT EXISTS rewards (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         title VARCHAR(200) NOT NULL,
@@ -48,9 +67,10 @@ async function autoInitDb() {
         partner_name VARCHAR(100),
         icon VARCHAR(20) DEFAULT '🎁',
         stock INTEGER DEFAULT 100,
-        is_active BOOLEAN DEFAULT TRUE,
+        is_active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+
       await pool.query(`CREATE TABLE IF NOT EXISTS user_redemptions (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         user_id TEXT NOT NULL,
@@ -60,6 +80,7 @@ async function autoInitDb() {
         status VARCHAR(20) DEFAULT 'active',
         redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`);
+
       await pool.query(`CREATE TABLE IF NOT EXISTS user_unlocked_items (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -73,24 +94,30 @@ async function autoInitDb() {
       const rewardCheck = await pool.query("SELECT COUNT(*) as count FROM rewards");
       if (parseInt(rewardCheck.rows[0]?.count || 0) === 0) {
         console.log('🎁 Seeding rewards data...');
-        const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
-        // Extract only rewards/redemptions/unlocked_items lines from seed
-        const rewardLines = seed.split('\n').filter(l =>
+        const seedFile = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+        const rewardLines = seedFile.split('\n').filter(l =>
           l.startsWith('INSERT OR REPLACE INTO rewards') ||
           l.startsWith('INSERT OR REPLACE INTO user_redemptions') ||
           l.startsWith('INSERT OR REPLACE INTO user_unlocked_items')
-        ).join('\n');
-        if (rewardLines.trim()) await pool.query(rewardLines);
+        );
+        for (const line of rewardLines) {
+          if (line.trim()) {
+            try { await pool.query(line); } catch (e) { console.error('Seed line error:', e.message); }
+          }
+        }
         console.log('✅ Rewards data seeded!');
+      } else {
+        console.log(`✅ Rewards table OK (${rewardCheck.rows[0]?.count} items)`);
       }
     } catch (e) {
-      console.error('Rewards init error:', e.message);
+      console.error('Rewards migration error:', e.message, e.stack);
     }
   } catch (err) {
     console.error('⚠️ Auto init error:', err.message);
   }
 }
 autoInitDb();
+
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));

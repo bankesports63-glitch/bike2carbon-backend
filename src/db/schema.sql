@@ -120,24 +120,25 @@ CREATE TABLE settings (
 -- Rewards
 CREATE TABLE IF NOT EXISTS rewards (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  title VARCHAR(150) NOT NULL,
+  title VARCHAR(200) NOT NULL,
   description TEXT,
   points_required INTEGER NOT NULL,
-  category VARCHAR(50) DEFAULT 'coupon',
-  image_url TEXT,
-  coupon_code VARCHAR(100),
-  stock_quantity INTEGER DEFAULT 100,
+  category VARCHAR(50) DEFAULT 'discount',
+  partner_name VARCHAR(100),
+  icon VARCHAR(20) DEFAULT '🎁',
+  stock INTEGER DEFAULT 100,
+  is_active INTEGER DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- User Redemptions
 CREATE TABLE IF NOT EXISTS user_redemptions (
   id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  reward_id TEXT NOT NULL REFERENCES rewards(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  reward_id TEXT NOT NULL,
   points_spent INTEGER NOT NULL,
-  coupon_code VARCHAR(100),
-  status VARCHAR(50) DEFAULT 'active',
+  code VARCHAR(50) NOT NULL,
+  status VARCHAR(20) DEFAULT 'active',
   redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

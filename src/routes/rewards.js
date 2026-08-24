@@ -7,8 +7,9 @@ const FirebaseSync = require('../db/firebase_sync');
 // Auto-initialize rewards tables if not present
 async function initRewardsTable() {
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS rewards (
+    // Create tables separately (SQLite doesn't support multi-statement well)
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS rewards (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
         title VARCHAR(200) NOT NULL,
         description TEXT,
@@ -17,24 +18,28 @@ async function initRewardsTable() {
         partner_name VARCHAR(100),
         icon VARCHAR(20) DEFAULT '🎁',
         stock INTEGER DEFAULT 100,
-        is_active BOOLEAN DEFAULT TRUE,
+        is_active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
+      )`
+    );
 
-      CREATE TABLE IF NOT EXISTS user_redemptions (
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS user_redemptions (
         id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        reward_id TEXT NOT NULL REFERENCES rewards(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        reward_id TEXT NOT NULL,
         points_spent INTEGER NOT NULL,
         code VARCHAR(50) NOT NULL,
         status VARCHAR(20) DEFAULT 'active',
         redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+      )`
+    );
 
-    // Check if rewards are seeded
+    // Seed rewards if empty
     const count = await pool.query('SELECT COUNT(*) as count FROM rewards');
-    if (parseInt(count.rows[0].count) === 0) {
+    const rewardCount = parseInt(count.rows[0]?.count || 0);
+    if (rewardCount === 0) {
+      console.log('🎁 Seeding rewards...');
       const seedRewards = [
         ['ส่วนลด Café Amazon 30 บาท', 'ใช้ลดเครื่องดื่มทุกเมนูที่ Café Amazon ทั่วประเทศ', 50, 'discount', 'Café Amazon', '☕', 200],
         ['บัตรกำนัล ปลูกต้นไม้ 1 ต้น', 'ร่วมปลูกต้นไม้ในโครงการ Bike2Carbon Forest เพื่อโลกสีเขียว', 100, 'tree', 'มูลนิธิโลกสีเขียว', '🌳', 999],
@@ -52,9 +57,12 @@ async function initRewardsTable() {
           r
         );
       }
+      console.log('✅ Rewards seeded!');
+    } else {
+      console.log(`✅ Rewards table OK (${rewardCount} items)`);
     }
   } catch (err) {
-    console.error('Init rewards table error:', err);
+    console.error('Init rewards table error:', err.message, err.stack);
   }
 }
 
@@ -67,12 +75,12 @@ initRewardsTable();
 router.get('/', auth, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM rewards WHERE is_active = TRUE ORDER BY points_required ASC'
+      'SELECT * FROM rewards WHERE is_active = 1 ORDER BY points_required ASC'
     );
     res.json({ rewards: result.rows });
   } catch (err) {
-    console.error('Get rewards error:', err);
-    res.status(500).json({ error: 'Failed to get rewards' });
+    console.error('Get rewards error:', err.message);
+    res.status(500).json({ error: 'Failed to get rewards', detail: err.message });
   }
 });
 
