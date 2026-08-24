@@ -1,0 +1,9 @@
+node_modules/
+cloudflared.exe
+serviceAccountKey.json
+firebase-key.json
+*.sqlite
+*.sqlite3
+.env
+npm-debug.log
+.DS_Store
