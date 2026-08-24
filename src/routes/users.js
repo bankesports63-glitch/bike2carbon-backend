@@ -11,12 +11,13 @@ const path = require('path');
 async function initCustomizationTable() {
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS user_customizations (
+      CREATE TABLE IF NOT EXISTS user_unlocked_items (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         item_type TEXT NOT NULL,
         item_id TEXT NOT NULL,
-        unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, item_id)
       )
     `);
     // Ensure profile_banner column exists safely

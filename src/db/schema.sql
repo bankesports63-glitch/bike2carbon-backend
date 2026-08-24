@@ -116,6 +116,40 @@ CREATE TABLE settings (
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Rewards
+CREATE TABLE IF NOT EXISTS rewards (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  title VARCHAR(150) NOT NULL,
+  description TEXT,
+  points_required INTEGER NOT NULL,
+  category VARCHAR(50) DEFAULT 'coupon',
+  image_url TEXT,
+  coupon_code VARCHAR(100),
+  stock_quantity INTEGER DEFAULT 100,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User Redemptions
+CREATE TABLE IF NOT EXISTS user_redemptions (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reward_id TEXT NOT NULL REFERENCES rewards(id) ON DELETE CASCADE,
+  points_spent INTEGER NOT NULL,
+  coupon_code VARCHAR(100),
+  status VARCHAR(50) DEFAULT 'active',
+  redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User Unlocked Customizations
+CREATE TABLE IF NOT EXISTS user_unlocked_items (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, item_id)
+);
+
 -- Indexes
 CREATE INDEX idx_rides_user_id ON rides(user_id);
 CREATE INDEX idx_rides_start_time ON rides(start_time);
