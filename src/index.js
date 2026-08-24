@@ -27,6 +27,7 @@ async function autoInitDb() {
     const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
     await pool.query(schema);
 
+    // Restore rides/users if missing
     const rideCheck = await pool.query("SELECT COUNT(*) as count FROM rides");
     const count = rideCheck.rows && rideCheck.rows[0] ? (rideCheck.rows[0].count || 0) : 0;
     if (count === 0) {
@@ -34,6 +35,56 @@ async function autoInitDb() {
       const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
       await pool.query(seed);
       console.log('✅ Full database restored successfully!');
+    }
+
+    // Always ensure rewards exist (they are NOT dropped by schema)
+    try {
+      await pool.query(`CREATE TABLE IF NOT EXISTS rewards (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        title VARCHAR(200) NOT NULL,
+        description TEXT,
+        points_required INTEGER NOT NULL,
+        category VARCHAR(50) DEFAULT 'discount',
+        partner_name VARCHAR(100),
+        icon VARCHAR(20) DEFAULT '🎁',
+        stock INTEGER DEFAULT 100,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS user_redemptions (
+        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+        user_id TEXT NOT NULL,
+        reward_id TEXT NOT NULL,
+        points_spent INTEGER NOT NULL,
+        code VARCHAR(50) NOT NULL,
+        status VARCHAR(20) DEFAULT 'active',
+        redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS user_unlocked_items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        item_type TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, item_id)
+      )`);
+
+      // Seed rewards if empty
+      const rewardCheck = await pool.query("SELECT COUNT(*) as count FROM rewards");
+      if (parseInt(rewardCheck.rows[0]?.count || 0) === 0) {
+        console.log('🎁 Seeding rewards data...');
+        const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+        // Extract only rewards/redemptions/unlocked_items lines from seed
+        const rewardLines = seed.split('\n').filter(l =>
+          l.startsWith('INSERT OR REPLACE INTO rewards') ||
+          l.startsWith('INSERT OR REPLACE INTO user_redemptions') ||
+          l.startsWith('INSERT OR REPLACE INTO user_unlocked_items')
+        ).join('\n');
+        if (rewardLines.trim()) await pool.query(rewardLines);
+        console.log('✅ Rewards data seeded!');
+      }
+    } catch (e) {
+      console.error('Rewards init error:', e.message);
     }
   } catch (err) {
     console.error('⚠️ Auto init error:', err.message);

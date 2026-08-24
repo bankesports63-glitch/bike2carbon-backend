@@ -7,6 +7,7 @@ DROP VIEW IF EXISTS leaderboard_daily;
 DROP VIEW IF EXISTS leaderboard_weekly;
 DROP VIEW IF EXISTS leaderboard_view;
 
+-- NOTE: rewards, user_redemptions, user_unlocked_items are NOT dropped to preserve data
 DROP TABLE IF EXISTS user_badges;
 DROP TABLE IF EXISTS user_challenges;
 DROP TABLE IF EXISTS gps_points;
