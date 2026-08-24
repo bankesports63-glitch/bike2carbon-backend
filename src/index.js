@@ -24,14 +24,15 @@ const fs = require('fs');
 
 async function autoInitDb() {
   try {
-    const tableCheck = await pool.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
-    if (!tableCheck.rows || tableCheck.rows.length === 0) {
-      console.log('🔧 Auto-initializing database schema & seed data on startup...');
-      const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
-      await pool.query(schema);
+    const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
+    await pool.query(schema);
+
+    const userCheck = await pool.query("SELECT id FROM users WHERE email = 'bank@gmail.com'");
+    if (!userCheck.rows || userCheck.rows.length === 0) {
+      console.log('🌱 Restoring seed and real users into database...');
       const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
       await pool.query(seed);
-      console.log('✅ Auto-initialization complete!');
+      console.log('✅ Real users restored successfully!');
     }
   } catch (err) {
     console.error('⚠️ Auto init error:', err.message);
