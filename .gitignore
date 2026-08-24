@@ -1,4 +1,5 @@
 node_modules/
+package-lock.json
 cloudflared.exe
 serviceAccountKey.json
 firebase-key.json
