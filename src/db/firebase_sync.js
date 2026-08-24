@@ -10,17 +10,19 @@ const FirebaseSync = {
         email: user.email,
         profile_image: user.profile_image || '/avatars/avatar_1.jpg',
         profile_frame: user.profile_frame || 'frame_none',
+        profile_banner: user.profile_banner || 'banner_cyber_forest',
         total_distance_km: Number(user.total_distance_km || 0),
         total_co2_reduced_kg: Number(user.total_co2_reduced_kg || 0),
         total_green_points: Number(user.total_green_points || 0),
         total_rides: Number(user.total_rides || 0),
         updated_at: new Date().toISOString(),
       }, { merge: true });
-      console.log(`🔥 [Firestore] Synced user: ${user.name} (${user.id})`);
+      console.log(`🔥 [Firestore] Synced user: ${user.name} pts=${user.total_green_points}`);
     } catch (err) {
       console.error('⚠️ [Firestore] Sync user error:', err.message);
     }
   },
+
 
   async syncRide(ride, gpsPoints = []) {
     if (!isFirebaseConnected || !db || !ride || !ride.id) return;

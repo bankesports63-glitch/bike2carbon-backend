@@ -512,12 +512,14 @@ router.put('/equip', auth, async (req, res) => {
     const query = `UPDATE users SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = $${paramIdx} RETURNING id, name, email, profile_image, profile_frame, profile_banner, total_green_points`;
     const result = await pool.query(query, params);
 
-    const updatedUser = result.rows[0];
-    if (updatedUser) FirebaseSync.syncUser(updatedUser);
+    // Fetch full user data for Firebase sync (RETURNING may miss stats fields)
+    const fullUserRes = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const syncUser = fullUserRes.rows[0];
+    if (syncUser) FirebaseSync.syncUser(syncUser);
 
     res.json({
       message: 'สวมใส่อุปกรณ์สำเร็จ! ✨',
-      user: updatedUser,
+      user: updatedUser || syncUser,
     });
   } catch (err) {
     console.error('Equip item error:', err);
@@ -561,12 +563,14 @@ router.put('/profile', auth, async (req, res) => {
     const query = `UPDATE users SET ${updateFields.join(', ')}, updated_at = NOW() WHERE id = $${paramIdx} RETURNING id, name, email, profile_image, profile_frame, profile_banner, total_green_points`;
     const result = await pool.query(query, params);
 
-    const updatedUser = result.rows[0];
-    if (updatedUser) FirebaseSync.syncUser(updatedUser);
+    // Fetch full user data for Firebase sync
+    const fullUserRes = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const syncUser = fullUserRes.rows[0];
+    if (syncUser) FirebaseSync.syncUser(syncUser);
 
     res.json({
       message: 'Profile updated successfully',
-      user: updatedUser,
+      user: result.rows[0] || syncUser,
     });
   } catch (err) {
     console.error('Update profile error:', err);

@@ -27,15 +27,93 @@ async function autoInitDb() {
     const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
     await pool.query(schema);
 
-    // Restore rides/users if missing
+    // Restore rides/users if missing - Try Firebase first, then seed.sql as fallback
     const rideCheck = await pool.query("SELECT COUNT(*) as count FROM rides");
     const count = rideCheck.rows && rideCheck.rows[0] ? (rideCheck.rows[0].count || 0) : 0;
     if (count === 0) {
-      console.log('🌱 Restoring full database (users, rides, badges, rewards, customizations)...');
-      const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
-      await pool.query(seed);
-      console.log('✅ Full database restored successfully!');
+      console.log('📦 SQLite is empty. Attempting Firebase restore first...');
+      let firebaseRestored = false;
+
+      try {
+        const { db, isFirebaseConnected } = require('./db/firebase');
+        if (isFirebaseConnected && db) {
+          // Restore users from Firebase
+          const usersSnap = await db.collection('users').get();
+          if (!usersSnap.empty) {
+            console.log(`🔥 Restoring ${usersSnap.size} users from Firebase...`);
+            for (const doc of usersSnap.docs) {
+              const u = doc.data();
+              await pool.query(
+                `INSERT OR REPLACE INTO users 
+                  (id, name, email, password_hash, profile_image, profile_frame, profile_banner,
+                   total_distance_km, total_co2_reduced_kg, total_green_points, total_rides, created_at, updated_at)
+                 SELECT ?, u.name, u.email, u.password_hash, ?, ?, ?,
+                        ?, ?, ?, ?, u.created_at, ?
+                 FROM (SELECT name, email, password_hash, created_at FROM users WHERE id = ? LIMIT 1) u`,
+                [u.id, u.profile_image || null, u.profile_frame || 'frame_none', u.profile_banner || 'banner_cyber_forest',
+                 u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0, u.total_rides || 0,
+                 u.updated_at || new Date().toISOString(), u.id]
+              ).catch(() => {});
+            }
+
+            // Fall back seed to get password_hashes (Firebase doesn't store passwords)
+            console.log('🌱 Seeding base data (passwords + rides) from seed.sql...');
+            const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+            await pool.query(seed);
+            console.log('🌱 seed.sql restored base data');
+
+            // Now overwrite user stats with Firebase latest data (more recent than seed)
+            for (const doc of usersSnap.docs) {
+              const u = doc.data();
+              await pool.query(
+                `UPDATE users SET 
+                  total_distance_km = ?, total_co2_reduced_kg = ?, total_green_points = ?,
+                  total_rides = ?, profile_image = ?, profile_frame = ?, profile_banner = ?, updated_at = ?
+                 WHERE id = ?`,
+                [u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0,
+                 u.total_rides || 0, u.profile_image || null, u.profile_frame || 'frame_none',
+                 u.profile_banner || 'banner_cyber_forest', u.updated_at || new Date().toISOString(), u.id]
+              ).catch(e => console.error('User update error:', e.message));
+            }
+            console.log('✅ Firebase user stats restored successfully!');
+            firebaseRestored = true;
+          }
+        }
+      } catch (fbErr) {
+        console.error('⚠️ Firebase restore failed:', fbErr.message);
+      }
+
+      if (!firebaseRestored) {
+        console.log('🌱 Restoring from seed.sql (no Firebase data)...');
+        const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+        await pool.query(seed);
+        console.log('✅ seed.sql database restored!');
+      }
+    } else {
+      // DB has data — still sync latest Firebase user stats to ensure up-to-date
+      try {
+        const { db, isFirebaseConnected } = require('./db/firebase');
+        if (isFirebaseConnected && db) {
+          const usersSnap = await db.collection('users').get();
+          for (const doc of usersSnap.docs) {
+            const u = doc.data();
+            // Only update if Firebase data is newer
+            await pool.query(
+              `UPDATE users SET 
+                total_distance_km = ?, total_co2_reduced_kg = ?, total_green_points = ?,
+                total_rides = ?, profile_frame = ?, profile_banner = ?, updated_at = ?
+               WHERE id = ? AND (updated_at IS NULL OR updated_at < ?)`,
+              [u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0,
+               u.total_rides || 0, u.profile_frame || 'frame_none',
+               u.profile_banner || 'banner_cyber_forest', u.updated_at || '',
+               u.id, u.updated_at || '']
+            ).catch(() => {});
+          }
+          console.log('🔥 Synced latest user stats from Firebase on startup');
+        }
+      } catch (_) {}
     }
+
 
     // Migrate rewards table if it has the old wrong schema (missing is_active column)
     try {
