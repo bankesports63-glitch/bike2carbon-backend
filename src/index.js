@@ -19,6 +19,26 @@ app.use((req, res, next) => {
   next();
 });
 
+const pool = require('./db/pool');
+const fs = require('fs');
+
+async function autoInitDb() {
+  try {
+    const tableCheck = await pool.query("SELECT name FROM sqlite_master WHERE type='table' AND name='users'");
+    if (!tableCheck.rows || tableCheck.rows.length === 0) {
+      console.log('🔧 Auto-initializing database schema & seed data on startup...');
+      const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
+      await pool.query(schema);
+      const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+      await pool.query(seed);
+      console.log('✅ Auto-initialization complete!');
+    }
+  } catch (err) {
+    console.error('⚠️ Auto init error:', err.message);
+  }
+}
+autoInitDb();
+
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
