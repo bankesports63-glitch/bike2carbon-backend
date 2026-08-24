@@ -49,7 +49,11 @@ app.use('/api/badges', require('./routes/badges'));
 app.use('/api/stats', require('./routes/stats'));
 app.use('/api/rewards', require('./routes/rewards'));
 
-// Health check
+// Root & Health check
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', service: 'Bike2Carbon API 24/7 Cloud', uptime: process.uptime() });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), service: 'Bike2Carbon API' });
 });

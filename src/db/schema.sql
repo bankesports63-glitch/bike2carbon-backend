@@ -23,6 +23,8 @@ CREATE TABLE users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   profile_image TEXT,
+  profile_frame TEXT DEFAULT 'frame_none',
+  profile_banner TEXT DEFAULT 'banner_cyber_forest',
   total_distance_km DECIMAL(10,2) DEFAULT 0,
   total_co2_reduced_kg DECIMAL(10,3) DEFAULT 0,
   total_green_points INTEGER DEFAULT 0,
