@@ -111,11 +111,13 @@ router.get('/me', auth, async (req, res) => {
   }
 });
 
+const JWT_SECRET = process.env.JWT_SECRET || 'bike2carbon_production_jwt_secret_key_2026_secure';
+
 function generateToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, name: user.name },
-    process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
   );
 }
 
