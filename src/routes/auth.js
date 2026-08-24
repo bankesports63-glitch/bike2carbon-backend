@@ -6,6 +6,8 @@ const pool = require('../db/pool');
 const auth = require('../middleware/auth');
 const FirebaseSync = require('../db/firebase_sync');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'bike2carbon_production_jwt_secret_key_2026_secure';
+
 /**
  * POST /api/auth/register
  * Register a new user
