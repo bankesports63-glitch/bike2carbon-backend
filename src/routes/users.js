@@ -393,7 +393,7 @@ router.get('/customization', auth, async (req, res) => {
     });
   } catch (err) {
     console.error('Customization catalog error:', err);
-    res.status(500).json({ error: 'Failed to get customization catalog' });
+    res.status(500).json({ error: 'Failed to get customization catalog', details: err.message });
   }
 });
 
