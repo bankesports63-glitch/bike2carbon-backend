@@ -89,6 +89,45 @@ async function autoInitDb() {
         await pool.query(seed);
         console.log('✅ seed.sql database restored!');
       }
+
+      // After any restore, recalculate user stats from actual rides (source of truth)
+      console.log('🔢 Recalculating user stats from actual rides...');
+      try {
+        await pool.query(`
+          UPDATE users SET
+            total_distance_km = COALESCE((SELECT SUM(distance_km) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
+            total_co2_reduced_kg = COALESCE((SELECT SUM(co2_reduced_kg) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
+            total_green_points = COALESCE((SELECT SUM(green_points) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
+            total_rides = COALESCE((SELECT COUNT(*) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
+            updated_at = datetime('now')
+        `);
+        console.log('✅ User stats recalculated from rides!');
+
+        // Sync corrected stats to Firebase
+        const { db: fbDb, isFirebaseConnected: fbOk } = require('./db/firebase');
+        if (fbOk && fbDb) {
+          const allUsers = await pool.query('SELECT * FROM users');
+          for (const u of allUsers.rows) {
+            await fbDb.collection('users').doc(u.id).set({
+              id: u.id,
+              name: u.name,
+              email: u.email,
+              profile_image: u.profile_image || null,
+              profile_frame: u.profile_frame || 'frame_none',
+              profile_banner: u.profile_banner || 'banner_cyber_forest',
+              total_distance_km: Number(u.total_distance_km || 0),
+              total_co2_reduced_kg: Number(u.total_co2_reduced_kg || 0),
+              total_green_points: Number(u.total_green_points || 0),
+              total_rides: Number(u.total_rides || 0),
+              updated_at: new Date().toISOString(),
+            }, { merge: true }).catch(() => {});
+          }
+          console.log('🔥 Correct stats synced to Firebase!');
+        }
+      } catch (e) {
+        console.error('Recalc error:', e.message);
+      }
+
     } else {
       // DB has data — still sync latest Firebase user stats to ensure up-to-date
       try {
