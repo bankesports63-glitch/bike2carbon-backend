@@ -539,8 +539,9 @@ router.put('/equip', auth, async (req, res) => {
 
     res.json({
       message: 'สวมใส่อุปกรณ์สำเร็จ! ✨',
-      user: updatedUser || syncUser,
+      user: syncUser || result.rows[0],
     });
+
   } catch (err) {
     console.error('Equip item error:', err);
     res.status(500).json({ error: 'Failed to equip item' });
