@@ -96,6 +96,25 @@ const FirebaseSync = {
       console.error('⚠️ [Firestore] Sync customization error:', err.message);
     }
   },
+
+  async syncChallengeClaim(claim) {
+    if (!isFirebaseConnected || !db || !claim) return;
+    try {
+      const docId = `${claim.user_id}_${claim.challenge_id}`;
+      await db.collection('user_challenges').doc(docId).set({
+        id: claim.id || docId,
+        user_id: claim.user_id,
+        challenge_id: claim.challenge_id,
+        progress: Number(claim.progress || 0),
+        reward_claimed: true,
+        completed_at: claim.completed_at || new Date().toISOString(),
+      }, { merge: true });
+      console.log(`🔥 [Firestore] Synced challenge claim: ${claim.challenge_id}`);
+    } catch (err) {
+      console.error('⚠️ [Firestore] Sync challenge claim error:', err.message);
+    }
+  },
 };
 
 module.exports = FirebaseSync;
+

@@ -27,136 +27,105 @@ async function autoInitDb() {
     const schema = fs.readFileSync(path.join(__dirname, 'db/schema.sql'), 'utf8');
     await pool.query(schema);
 
-    // Restore rides/users if missing - Try Firebase first, then seed.sql as fallback
+    // 1. Seed base data (badges, challenges, default structure) if rides table is empty
     const rideCheck = await pool.query("SELECT COUNT(*) as count FROM rides");
     const count = rideCheck.rows && rideCheck.rows[0] ? (rideCheck.rows[0].count || 0) : 0;
     if (count === 0) {
-      console.log('📦 SQLite is empty. Attempting Firebase restore first...');
-      let firebaseRestored = false;
-
-      try {
-        const { db, isFirebaseConnected } = require('./db/firebase');
-        if (isFirebaseConnected && db) {
-          // Restore users from Firebase
-          const usersSnap = await db.collection('users').get();
-          if (!usersSnap.empty) {
-            console.log(`🔥 Restoring ${usersSnap.size} users from Firebase...`);
-            for (const doc of usersSnap.docs) {
-              const u = doc.data();
-              await pool.query(
-                `INSERT OR REPLACE INTO users 
-                  (id, name, email, password_hash, profile_image, profile_frame, profile_banner,
-                   total_distance_km, total_co2_reduced_kg, total_green_points, total_rides, created_at, updated_at)
-                 SELECT ?, u.name, u.email, u.password_hash, ?, ?, ?,
-                        ?, ?, ?, ?, u.created_at, ?
-                 FROM (SELECT name, email, password_hash, created_at FROM users WHERE id = ? LIMIT 1) u`,
-                [u.id, u.profile_image || null, u.profile_frame || 'frame_none', u.profile_banner || 'banner_cyber_forest',
-                 u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0, u.total_rides || 0,
-                 u.updated_at || new Date().toISOString(), u.id]
-              ).catch(() => {});
-            }
-
-            // Fall back seed to get password_hashes (Firebase doesn't store passwords)
-            console.log('🌱 Seeding base data (passwords + rides) from seed.sql...');
-            const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
-            await pool.query(seed);
-            console.log('🌱 seed.sql restored base data');
-
-            // Now overwrite user stats with Firebase latest data (more recent than seed)
-            for (const doc of usersSnap.docs) {
-              const u = doc.data();
-              await pool.query(
-                `UPDATE users SET 
-                  total_distance_km = ?, total_co2_reduced_kg = ?, total_green_points = ?,
-                  total_rides = ?, profile_image = ?, profile_frame = ?, profile_banner = ?, updated_at = ?
-                 WHERE id = ?`,
-                [u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0,
-                 u.total_rides || 0, u.profile_image || null, u.profile_frame || 'frame_none',
-                 u.profile_banner || 'banner_cyber_forest', u.updated_at || new Date().toISOString(), u.id]
-              ).catch(e => console.error('User update error:', e.message));
-            }
-            console.log('✅ Firebase user stats restored successfully!');
-            firebaseRestored = true;
-          }
-        }
-      } catch (fbErr) {
-        console.error('⚠️ Firebase restore failed:', fbErr.message);
-      }
-
-      if (!firebaseRestored) {
-        console.log('🌱 Restoring from seed.sql (no Firebase data)...');
-        const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
-        await pool.query(seed);
-        console.log('✅ seed.sql database restored!');
-      }
-
-      // After any restore, recalculate user stats from actual rides (source of truth)
-      console.log('🔢 Recalculating user stats from actual rides...');
-      try {
-        await pool.query(`
-          UPDATE users SET
-            total_distance_km = COALESCE((SELECT SUM(distance_km) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
-            total_co2_reduced_kg = COALESCE((SELECT SUM(co2_reduced_kg) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
-            total_green_points = COALESCE((SELECT SUM(green_points) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
-            total_rides = COALESCE((SELECT COUNT(*) FROM rides WHERE user_id = users.id AND status = 'completed'), 0),
-            updated_at = datetime('now')
-        `);
-        console.log('✅ User stats recalculated from rides!');
-
-        // Sync corrected stats to Firebase
-        const { db: fbDb, isFirebaseConnected: fbOk } = require('./db/firebase');
-        if (fbOk && fbDb) {
-          const allUsers = await pool.query('SELECT * FROM users');
-          for (const u of allUsers.rows) {
-            await fbDb.collection('users').doc(u.id).set({
-              id: u.id,
-              name: u.name,
-              email: u.email,
-              profile_image: u.profile_image || null,
-              profile_frame: u.profile_frame || 'frame_none',
-              profile_banner: u.profile_banner || 'banner_cyber_forest',
-              total_distance_km: Number(u.total_distance_km || 0),
-              total_co2_reduced_kg: Number(u.total_co2_reduced_kg || 0),
-              total_green_points: Number(u.total_green_points || 0),
-              total_rides: Number(u.total_rides || 0),
-              updated_at: new Date().toISOString(),
-            }, { merge: true }).catch(() => {});
-          }
-          console.log('🔥 Correct stats synced to Firebase!');
-        }
-      } catch (e) {
-        console.error('Recalc error:', e.message);
-      }
-
-    } else {
-      // DB has data — still sync latest Firebase user stats to ensure up-to-date
-      try {
-        const { db, isFirebaseConnected } = require('./db/firebase');
-        if (isFirebaseConnected && db) {
-          const usersSnap = await db.collection('users').get();
-          for (const doc of usersSnap.docs) {
-            const u = doc.data();
-            // Only update if Firebase data is newer
-            await pool.query(
-              `UPDATE users SET 
-                total_distance_km = ?, total_co2_reduced_kg = ?, total_green_points = ?,
-                total_rides = ?, profile_frame = ?, profile_banner = ?, updated_at = ?
-               WHERE id = ? AND (updated_at IS NULL OR updated_at < ?)`,
-              [u.total_distance_km || 0, u.total_co2_reduced_kg || 0, u.total_green_points || 0,
-               u.total_rides || 0, u.profile_frame || 'frame_none',
-               u.profile_banner || 'banner_cyber_forest', u.updated_at || '',
-               u.id, u.updated_at || '']
-            ).catch(() => {});
-          }
-          console.log('🔥 Synced latest user stats from Firebase on startup');
-        }
-      } catch (_) {}
+      console.log('🌱 Loading base seed data from seed.sql...');
+      const seed = fs.readFileSync(path.join(__dirname, 'db/seed.sql'), 'utf8');
+      await pool.query(seed);
+      console.log('✅ Base seed data loaded');
     }
 
-    // Restore missing avatar images from Firestore backup
+    // 2. Comprehensive Cloud Restore from Google Firestore (Source of Truth)
     try {
       const { db: fbDb, isFirebaseConnected: fbOk } = require('./db/firebase');
       if (fbOk && fbDb) {
+        console.log('🔥 Connecting to Google Firestore Cloud for full system restore...');
+
+        // 2.1 Restore Users (Stats, Points, Avatar, Frame, Banner)
+        const usersSnap = await fbDb.collection('users').get();
+        if (!usersSnap.empty) {
+          console.log(`🔥 Restoring ${usersSnap.size} users from Firestore...`);
+          for (const doc of usersSnap.docs) {
+            const u = doc.data();
+            await pool.query(
+              `UPDATE users SET 
+                total_distance_km = ?, total_co2_reduced_kg = ?, total_green_points = ?,
+                total_rides = ?, profile_image = ?, profile_frame = ?, profile_banner = ?, updated_at = ?
+               WHERE id = ?`,
+              [Number(u.total_distance_km || 0), Number(u.total_co2_reduced_kg || 0), Number(u.total_green_points || 0),
+               Number(u.total_rides || 0), u.profile_image || null, u.profile_frame || 'frame_none',
+               u.profile_banner || 'banner_cyber_forest', u.updated_at || new Date().toISOString(), u.id]
+            ).catch(e => console.error('User update error:', e.message));
+          }
+          console.log('✅ Users restored with exact Cloud points & customizations!');
+        }
+
+        // 2.2 Restore Unlocked Customizations (Banners, Frames, Avatars)
+        const unlockSnap = await fbDb.collection('user_unlocked_items').get();
+        if (!unlockSnap.empty) {
+          console.log(`🔥 Restoring ${unlockSnap.size} unlocked items from Firestore...`);
+          for (const doc of unlockSnap.docs) {
+            const un = doc.data();
+            await pool.query(
+              `INSERT OR REPLACE INTO user_unlocked_items (id, user_id, item_type, item_id, unlocked_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              [un.id || doc.id, un.user_id, un.item_type, un.item_id, un.unlocked_at || new Date().toISOString()]
+            ).catch(e => console.error('Unlock restore error:', e.message));
+          }
+          console.log('✅ Unlocked customizations restored!');
+        }
+
+        // 2.3 Restore Vouchers & Redemptions (Coupons)
+        const redeemSnap = await fbDb.collection('user_redemptions').get();
+        if (!redeemSnap.empty) {
+          console.log(`🔥 Restoring ${redeemSnap.size} coupon redemptions from Firestore...`);
+          for (const doc of redeemSnap.docs) {
+            const r = doc.data();
+            await pool.query(
+              `INSERT OR REPLACE INTO user_redemptions (id, user_id, reward_id, points_spent, code, status, redeemed_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              [r.id || doc.id, r.user_id, r.reward_id, Number(r.points_spent || 0), r.voucher_code || r.code || 'CODE', r.status || 'active', r.redeemed_at || new Date().toISOString()]
+            ).catch(e => console.error('Redemption restore error:', e.message));
+          }
+          console.log('✅ Coupon redemptions restored!');
+        }
+
+        // 2.4 Restore Completed Rides
+        const ridesSnap = await fbDb.collection('rides').get();
+        if (!ridesSnap.empty) {
+          console.log(`🔥 Restoring ${ridesSnap.size} rides from Firestore...`);
+          for (const doc of ridesSnap.docs) {
+            const rd = doc.data();
+            await pool.query(
+              `INSERT OR REPLACE INTO rides (id, user_id, status, start_time, end_time, distance_km, duration_sec, avg_speed_kmh, max_speed_kmh, co2_reduced_kg, green_points, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [rd.id || doc.id, rd.user_id, rd.status || 'completed', rd.start_time, rd.end_time || null,
+               Number(rd.distance_km || 0), Number(rd.duration_sec || 0), Number(rd.avg_speed_kmh || 0),
+               Number(rd.max_speed_kmh || 0), Number(rd.co2_reduced_kg || 0), Number(rd.green_points_earned || rd.green_points || 0),
+               rd.created_at || new Date().toISOString()]
+            ).catch(e => console.error('Ride restore error:', e.message));
+          }
+          console.log('✅ Rides restored from Cloud!');
+        }
+
+        // 2.5 Restore Claimed Challenges
+        const chalSnap = await fbDb.collection('user_challenges').get();
+        if (!chalSnap.empty) {
+          console.log(`🔥 Restoring ${chalSnap.size} challenge records from Firestore...`);
+          for (const doc of chalSnap.docs) {
+            const ch = doc.data();
+            await pool.query(
+              `INSERT OR REPLACE INTO user_challenges (id, user_id, challenge_id, progress, completed_at, reward_claimed)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              [ch.id || doc.id, ch.user_id, ch.challenge_id, Number(ch.progress || 0), ch.completed_at || new Date().toISOString(), ch.reward_claimed ? 1 : 0]
+            ).catch(e => console.error('Challenge restore error:', e.message));
+          }
+          console.log('✅ Challenges restored from Cloud!');
+        }
+
+        // 2.6 Restore Avatar Image Files
         const avatarsDir = path.join(__dirname, '../public/avatars');
         if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
 
@@ -166,7 +135,6 @@ async function autoInitDb() {
           const data = doc.data();
           if (!data.image_base64 || !data.filename) continue;
           const filePath = path.join(avatarsDir, data.filename);
-          // Only recreate if file is missing
           if (!fs.existsSync(filePath)) {
             try {
               const buffer = Buffer.from(data.image_base64, 'base64');
@@ -178,11 +146,12 @@ async function autoInitDb() {
             }
           }
         }
-        if (restoredCount > 0) console.log(`✅ Restored ${restoredCount} avatar(s) from Firestore!`);
+        if (restoredCount > 0) console.log(`✅ Restored ${restoredCount} avatar file(s) from Firestore!`);
       }
-    } catch (avatarErr) {
-      console.error('Avatar restore error:', avatarErr.message);
+    } catch (fbErr) {
+      console.error('⚠️ Firestore Cloud Restore error:', fbErr.message);
     }
+
 
 
     // Migrate rewards table if it has the old wrong schema (missing is_active column)

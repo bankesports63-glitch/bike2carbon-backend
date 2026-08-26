@@ -153,12 +153,21 @@ router.post('/:id/claim', auth, async (req, res) => {
     const updatedUser = userRes.rows[0];
     if (updatedUser) FirebaseSync.syncUser(updatedUser);
 
+    // Sync challenge claim to Firestore
+    FirebaseSync.syncChallengeClaim({
+      user_id: req.user.id,
+      challenge_id: id,
+      progress: challenge.progress,
+      completed_at: new Date().toISOString(),
+    });
+
     res.json({
       message: `รับแต้ม +${challenge.reward_points} Green Points สำเร็จ! 🎉`,
       reward_points: challenge.reward_points,
       total_green_points: updatedUser?.total_green_points || 0,
       challenge_id: id,
     });
+
   } catch (err) {
     console.error('Claim challenge error:', err);
     res.status(500).json({ error: 'ไม่สามารถรับแต้มรางวัลได้' });
