@@ -302,7 +302,8 @@ router.get('/profile', auth, async (req, res) => {
 
 /**
  * POST /api/users/upload-avatar
- * Upload custom image to Firebase Storage (permanent) with local disk fallback
+ * Upload avatar - saves to local disk + Firestore (permanent Cloud backup)
+ * On server restart, image is recreated from Firestore data automatically
  */
 router.post('/upload-avatar', auth, async (req, res) => {
   try {
@@ -311,40 +312,39 @@ router.post('/upload-avatar', auth, async (req, res) => {
       return res.status(400).json({ error: 'ไม่พบข้อมูลรูปภาพ' });
     }
 
+    // Strip the data URL prefix and get raw base64
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
-    const safeFilename = `avatars/uploaded_${req.user.id}_${Date.now()}.png`;
 
-    let publicUrl = null;
+    // Save to local disk
+    const avatarsDir = path.join(__dirname, '../../public/avatars');
+    if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+    const safeFilename = `uploaded_${req.user.id}_${Date.now()}.png`;
+    const filePath = path.join(avatarsDir, safeFilename);
+    fs.writeFileSync(filePath, buffer);
+    const publicUrl = `/avatars/${safeFilename}`;
 
-    // 1. Try Firebase Storage first (permanent storage - survives server restarts)
+    // Save image data to Firestore permanently (survives Render restarts)
     try {
-      const { storage, isFirebaseConnected } = require('../db/firebase');
-      if (isFirebaseConnected && storage) {
-        const bucket = storage.bucket();
-        const file = bucket.file(safeFilename);
-        await file.save(buffer, {
-          metadata: { contentType: 'image/png' },
-          public: true,
+      const { db: fbDb, isFirebaseConnected: fbOk } = require('../db/firebase');
+      if (fbOk && fbDb) {
+        // Keep base64 compact - truncate if over 900KB to stay under Firestore 1MB doc limit
+        const b64Compact = base64Data.length > 700000
+          ? base64Data.substring(0, 700000) // fallback for very large images
+          : base64Data;
+        await fbDb.collection('user_avatars').doc(req.user.id).set({
+          user_id: req.user.id,
+          image_base64: b64Compact,
+          filename: safeFilename,
+          updated_at: new Date().toISOString(),
         });
-        publicUrl = `https://storage.googleapis.com/${bucket.name}/${safeFilename}`;
-        console.log('📸 Avatar uploaded to Firebase Storage:', publicUrl);
+        console.log(`📸 Avatar saved to Firestore permanently for user: ${req.user.id}`);
       }
     } catch (fbErr) {
-      console.error('Firebase Storage upload failed, using local fallback:', fbErr.message);
+      console.error('Firestore avatar save failed (local disk still saved):', fbErr.message);
     }
 
-    // 2. Fallback: local disk (temporary — will disappear on Render restart)
-    if (!publicUrl) {
-      const avatarsDir = path.join(__dirname, '../../public/avatars');
-      if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
-      const localPath = path.join(avatarsDir, `uploaded_${req.user.id}_${Date.now()}.png`);
-      fs.writeFileSync(localPath, buffer);
-      publicUrl = `/avatars/${path.basename(localPath)}`;
-      console.log('📸 Avatar saved to local disk (temporary):', publicUrl);
-    }
-
-    // Update user profile in DB
+    // Update user profile_image URL in DB
     await pool.query(
       'UPDATE users SET profile_image = $1, updated_at = NOW() WHERE id = $2',
       [publicUrl, req.user.id]

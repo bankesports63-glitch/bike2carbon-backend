@@ -153,6 +153,37 @@ async function autoInitDb() {
       } catch (_) {}
     }
 
+    // Restore missing avatar images from Firestore backup
+    try {
+      const { db: fbDb, isFirebaseConnected: fbOk } = require('./db/firebase');
+      if (fbOk && fbDb) {
+        const avatarsDir = path.join(__dirname, '../public/avatars');
+        if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+
+        const avatarSnap = await fbDb.collection('user_avatars').get();
+        let restoredCount = 0;
+        for (const doc of avatarSnap.docs) {
+          const data = doc.data();
+          if (!data.image_base64 || !data.filename) continue;
+          const filePath = path.join(avatarsDir, data.filename);
+          // Only recreate if file is missing
+          if (!fs.existsSync(filePath)) {
+            try {
+              const buffer = Buffer.from(data.image_base64, 'base64');
+              fs.writeFileSync(filePath, buffer);
+              restoredCount++;
+              console.log(`📸 Restored avatar file: ${data.filename}`);
+            } catch (e) {
+              console.error('Avatar restore write error:', e.message);
+            }
+          }
+        }
+        if (restoredCount > 0) console.log(`✅ Restored ${restoredCount} avatar(s) from Firestore!`);
+      }
+    } catch (avatarErr) {
+      console.error('Avatar restore error:', avatarErr.message);
+    }
+
 
     // Migrate rewards table if it has the old wrong schema (missing is_active column)
     try {
