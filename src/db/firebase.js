@@ -1,11 +1,13 @@
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const { getStorage } = require('firebase-admin/storage');
 const path = require('path');
 const fs = require('fs');
 
 let db = null;
 let auth = null;
+let storage = null;
 let isFirebaseConnected = false;
 let app = null;
 
@@ -31,9 +33,11 @@ if (serviceAccount) {
   try {
     app = initializeApp({
       credential: cert(serviceAccount),
+      storageBucket: `${serviceAccount.project_id}.appspot.com`,
     });
     db = getFirestore();
     auth = getAuth();
+    storage = getStorage();
     isFirebaseConnected = true;
     console.log('🔥 Connected to Google Firebase Cloud Firestore successfully!');
     console.log(`📁 Project ID: ${serviceAccount.project_id}`);
@@ -48,9 +52,11 @@ if (serviceAccount) {
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
         privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
       }),
+      storageBucket: `${process.env.FIREBASE_PROJECT_ID}.appspot.com`,
     });
     db = getFirestore();
     auth = getAuth();
+    storage = getStorage();
     isFirebaseConnected = true;
     console.log('🔥 Connected to Google Firebase via Environment Variables!');
   } catch (err) {
@@ -65,5 +71,6 @@ module.exports = {
   app,
   db,
   auth,
+  storage,
   isFirebaseConnected,
 };

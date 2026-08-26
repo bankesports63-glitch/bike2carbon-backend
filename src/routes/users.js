@@ -302,7 +302,7 @@ router.get('/profile', auth, async (req, res) => {
 
 /**
  * POST /api/users/upload-avatar
- * Upload custom image file (base64)
+ * Upload custom image to Firebase Storage (permanent) with local disk fallback
  */
 router.post('/upload-avatar', auth, async (req, res) => {
   try {
@@ -313,17 +313,36 @@ router.post('/upload-avatar', auth, async (req, res) => {
 
     const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Data, 'base64');
+    const safeFilename = `avatars/uploaded_${req.user.id}_${Date.now()}.png`;
 
-    const avatarsDir = path.join(__dirname, '../../public/avatars');
-    if (!fs.existsSync(avatarsDir)) {
-      fs.mkdirSync(avatarsDir, { recursive: true });
+    let publicUrl = null;
+
+    // 1. Try Firebase Storage first (permanent storage - survives server restarts)
+    try {
+      const { storage, isFirebaseConnected } = require('../db/firebase');
+      if (isFirebaseConnected && storage) {
+        const bucket = storage.bucket();
+        const file = bucket.file(safeFilename);
+        await file.save(buffer, {
+          metadata: { contentType: 'image/png' },
+          public: true,
+        });
+        publicUrl = `https://storage.googleapis.com/${bucket.name}/${safeFilename}`;
+        console.log('📸 Avatar uploaded to Firebase Storage:', publicUrl);
+      }
+    } catch (fbErr) {
+      console.error('Firebase Storage upload failed, using local fallback:', fbErr.message);
     }
 
-    const safeFilename = `uploaded_${req.user.id}_${Date.now()}.png`;
-    const filePath = path.join(avatarsDir, safeFilename);
-
-    fs.writeFileSync(filePath, buffer);
-    const publicUrl = `/avatars/${safeFilename}`;
+    // 2. Fallback: local disk (temporary — will disappear on Render restart)
+    if (!publicUrl) {
+      const avatarsDir = path.join(__dirname, '../../public/avatars');
+      if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+      const localPath = path.join(avatarsDir, `uploaded_${req.user.id}_${Date.now()}.png`);
+      fs.writeFileSync(localPath, buffer);
+      publicUrl = `/avatars/${path.basename(localPath)}`;
+      console.log('📸 Avatar saved to local disk (temporary):', publicUrl);
+    }
 
     // Update user profile in DB
     await pool.query(
@@ -336,15 +355,16 @@ router.post('/upload-avatar', auth, async (req, res) => {
     if (updatedUser) FirebaseSync.syncUser(updatedUser);
 
     res.json({
-      message: 'อัปโหลดรูปโปรไฟล์สำเร็จ!',
+      message: 'อัปโหลดรูปโปรไฟล์สำเร็จ! 📸',
       profile_image: publicUrl,
       user: updatedUser,
     });
   } catch (err) {
     console.error('Upload avatar error:', err);
-    res.status(500).json({ error: 'ไม่สามารถอัปโหลดรูปภาพได้' });
+    res.status(500).json({ error: 'ไม่สามารถอัปโหลดรูปภาพได้: ' + err.message });
   }
 });
+
 
 /**
  * GET /api/users/customization
